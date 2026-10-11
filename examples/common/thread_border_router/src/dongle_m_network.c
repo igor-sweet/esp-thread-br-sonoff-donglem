@@ -337,6 +337,13 @@ esp_err_t dongle_m_network_select_backbone(esp_netif_t **backbone)
     }
     if (wait_for(ETH_READY, CONFIG_ESP_BR_DONGLE_M_ETHERNET_WAIT_MS)) {
         *backbone = netif_for_ifkey("ETH_DEF");
+        if (*backbone) {
+            /* ESP-IDF 5.5.x filtert ff02::1 (Router Advertisements) auf Ethernet weg. */
+            bool all_multicast = true;
+            esp_err_t mc_err = esp_eth_ioctl(esp_netif_get_io_driver(*backbone), ETH_CMD_S_ALL_MULTICAST,
+                                             &all_multicast);
+            ESP_LOGI(TAG, "Ethernet receive-all-multicast: %s", esp_err_to_name(mc_err));
+        }
         state_set_selected(DONGLE_M_INFRA_ETHERNET);
         dongle_m_led_set_interface(DONGLE_M_LED_INTERFACE_ETHERNET);
         ESP_LOGI(TAG, "Selected Ethernet backbone");
