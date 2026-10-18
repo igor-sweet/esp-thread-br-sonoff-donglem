@@ -396,7 +396,11 @@ The release should contain at least:
 ```text
 sonoff-dongle-m-otbr-<version>.bin
 sonoff-dongle-m-otbr-<version>.bin.sha256
+sonoff-dongle-m-otbr-<version>-update.bin
+sonoff-dongle-m-otbr-<version>-update.bin.sha256
 ```
+
+The `-update` image is flashed at the application offset and keeps NVS; the other image is the factory image flashed at `0x0`.
 
 The GitHub Release **description/body** is the release changelog.
 
