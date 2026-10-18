@@ -163,6 +163,41 @@ python3 -m esptool --chip esp32 --port /dev/ttyUSB0 --baud 460800 \
 
 Replace `/dev/ttyUSB0` with the correct serial device.
 
+> Flashing the release image at `0x0` replaces **everything**, including the stored Thread network and Wi-Fi credentials.
+>
+> To update an existing installation and keep those settings, use the update image described below.
+
+---
+
+## Updating an existing installation (keeps settings)
+
+Each release also provides an **update image**:
+
+```text
+sonoff-dongle-m-otbr-<version>-update.bin
+```
+
+It contains only the application and the Web UI files. It does **not** touch the bootloader, the partition table or NVS, so the Thread network, Wi-Fi credentials and other stored settings are kept.
+
+The update image must be written at address `0x20000`, **not** `0x0`:
+
+```bash
+python3 -m esptool --chip esp32 --port /dev/ttyUSB0 --baud 460800 \
+  --before default_reset --after hard_reset \
+  write_flash 0x20000 sonoff-dongle-m-otbr-<version>-update.bin
+```
+
+On Windows, use the same arguments as in Method 2 with `0x20000` and the update image.
+
+Use the update image only when:
+
+- the device already runs a v2.x release of this firmware (same partition table);
+- the release notes do not say that a factory flash is required.
+
+Otherwise, use the normal release image at `0x0`.
+
+> Do **not** use the update image with the Sonoff Dongle Flasher. It writes images at `0x0`, which would overwrite the bootloader and partition table. The device would not boot until the normal release image is flashed again.
+
 ---
 
 # First boot and network behaviour
@@ -421,7 +456,11 @@ This creates:
 ```text
 artifacts/sonoff-dongle-m-otbr.bin
 artifacts/sonoff-dongle-m-otbr.bin.sha256
+artifacts/sonoff-dongle-m-otbr-update.bin
+artifacts/sonoff-dongle-m-otbr-update.bin.sha256
 ```
+
+The first image is flashed at `0x0`; the update image is flashed at `0x20000` and keeps the stored settings.
 
 The merge script reads the generated ESP-IDF flash metadata and uses the correct:
 
@@ -474,6 +513,8 @@ Normal branch builds produce CI artifacts such as:
 ```text
 sonoff-dongle-m-otbr-ci.bin
 sonoff-dongle-m-otbr-ci.bin.sha256
+sonoff-dongle-m-otbr-ci-update.bin
+sonoff-dongle-m-otbr-ci-update.bin.sha256
 ```
 
 Tagged releases use the tag name in the output filename.
@@ -489,6 +530,8 @@ produces:
 ```text
 sonoff-dongle-m-otbr-v2.0.0.bin
 sonoff-dongle-m-otbr-v2.0.0.bin.sha256
+sonoff-dongle-m-otbr-v2.0.0-update.bin
+sonoff-dongle-m-otbr-v2.0.0-update.bin.sha256
 ```
 
 The same files are attached automatically to the corresponding GitHub Release.

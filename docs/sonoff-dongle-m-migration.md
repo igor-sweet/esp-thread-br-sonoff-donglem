@@ -194,7 +194,10 @@ This approach has been hardware validated in both directions.
 
 ## Release packaging
 
-The public release format is a single merged **ESP32 host image**, flashed at offset `0x0`.
+The public release format consists of two merged **ESP32 host images**:
+
+- a **factory image**, flashed at offset `0x0`, used for first installation and recovery;
+- an **update image**, flashed at the application offset (`0x20000`), used to update an existing installation without erasing NVS.
 
 The repository tool:
 
@@ -207,10 +210,11 @@ The tool:
 1. verifies that the ESP-IDF-listed images exist;
 2. refuses to include an image identified as RCP firmware;
 3. invokes `esptool merge_bin` using the generated flash settings;
-4. creates one ESP32 image for flashing at `0x0`;
-5. writes a matching SHA-256 checksum.
+4. creates the factory image for flashing at `0x0`;
+5. creates the update image from all images at or above the application offset, using `merge_bin --target-offset`;
+6. writes a matching SHA-256 checksum for each image.
 
-The merged package contains:
+The factory image contains:
 
 - bootloader
 - partition table
@@ -218,7 +222,11 @@ The merged package contains:
 - `esp_ot_br`
 - `web_storage`
 
-It contains **no EFR32MG24 firmware**.
+Because `esptool merge_bin` fills gaps with `0xFF`, flashing the factory image at `0x0` also erases NVS, including the Thread dataset and Wi-Fi credentials.
+
+The update image contains only `esp_ot_br` and `web_storage` (with `0xFF` fill for the unused `ota_1` slot in between). It leaves the bootloader, partition table, NVS and OTA data untouched. It is only valid when the device already uses the same partition table, and it assumes the device boots from `ota_0`, which is always the case while no OTA update mechanism is in use.
+
+Both images contain **no EFR32MG24 firmware**.
 
 Generated images remain beneath the ignored `artifacts/` directory and are not committed.
 
