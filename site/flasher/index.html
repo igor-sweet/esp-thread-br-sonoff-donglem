@@ -74,6 +74,13 @@
       <label for="hostname">Hostname</label>
       <input id="hostname" type="text" placeholder="Unchanged (default: esp-ot-br)" maxlength="32" pattern="[a-z0-9]([a-z0-9\-]{0,30}[a-z0-9])?" autocomplete="off" spellcheck="false">
       <p class="hint" id="current-settings" hidden></p>
+      <div id="flash-baud-row">
+      <label for="flash-baud">USB flashing speed</label>
+      <select id="flash-baud">
+        <option value="115200">115200 baud (default, slower)</option>
+        <option value="460800">460800 baud (about four times faster)</option>
+      </select>
+      </div>
       <p class="hint" id="hostname-hint">1–32 lowercase letters, digits or '-', not starting or ending with '-'. Used for mDNS (<code>name.local</code>) and as DHCP hostname.</p>
     </details>
   </section>
