@@ -28,7 +28,6 @@ function refresh() {
   const mode = currentMode();
   const custom = $("source").value === "custom";
   $("firmware-source").hidden = !mode.flashes;
-  $("flash-baud-row").hidden = !mode.flashes;
   $("step2-title").textContent = mode.flashes ? "2 · Select firmware" : "2 · Device settings";
   if (!mode.flashes) $("advanced").open = true;
   $("latest-details").hidden = custom;
@@ -264,11 +263,9 @@ async function flash() {
       writeLine(text) { log(text); },
       write(text) { if (String(text).trim()) log(text); }
     };
-    // esptool-js connects at romBaudrate and switches to baudrate once its stub runs.
-    const baudrate = Number($("flash-baud").value);
-    const loader = new ESPLoader({ transport, baudrate, romBaudrate: 115200, terminal, debugLogging: false });
+    const loader = new ESPLoader({ transport, baudrate: 115200, terminal, debugLogging: false });
     const chip = await loader.main();
-    status(`Connected: ${chip}, flashing at ${baudrate} baud`);
+    status(`Connected: ${chip}`);
     // esptool-js may report the classic ESP32 as "Unknown ESP32 (revision 3)".
     // Check variant suffixes only immediately after "ESP32": a broad /P[0-9]/
     // would incorrectly reject the "P3" within the name "ESP32" itself.
