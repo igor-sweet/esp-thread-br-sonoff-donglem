@@ -15,6 +15,11 @@ const log = (message) => {
 };
 const status = (message) => { $("status").textContent = message; log(message); };
 const currentMode = () => MODE[modeInputs.find(i => i.checked).value];
+const HOSTNAME = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
+function deviceSettings() {
+  const hostname = $("hostname").value.trim();
+  return { netmode: $("netmode").value, hostname, valid: !hostname || HOSTNAME.test(hostname) };
+}
 
 function refresh() {
   const mode = currentMode();
@@ -27,7 +32,7 @@ function refresh() {
   $("confirmation-label").lastChild.textContent = mode.destructive
     ? " I understand this will erase all ESP32 settings, and have backed up my Thread dataset if one exists."
     : " This device already runs Scoobler OpenThread Border Router firmware, and I have backed up my Thread dataset.";
-  $("flash").disabled = busy || !$("confirm").checked ||
+  $("flash").disabled = busy || !$("confirm").checked || !deviceSettings().valid ||
     (custom ? !$("custom-file").files.length : !releaseManifest);
 }
 modeInputs.forEach(i => i.addEventListener("change", () => {
@@ -39,6 +44,8 @@ modeInputs.forEach(i => i.addEventListener("change", () => {
 $("source").addEventListener("change", refresh);
 $("custom-file").addEventListener("change", refresh);
 $("confirm").addEventListener("change", refresh);
+$("netmode").addEventListener("change", refresh);
+$("hostname").addEventListener("input", refresh);
 
 const bytesToHex = (array) => [...array].map(x => x.toString(16).padStart(2, "0")).join("");
 const sha256 = async (data) => bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", data)));
@@ -80,11 +87,78 @@ async function getImage(mode) {
   return new Uint8Array(data);
 }
 
+async function applySettings(port, settings) {
+  // Applies the advanced settings through the firmware's "dongle" console command after the reset.
+  const decoder = new TextDecoder();
+  const encoder = new TextEncoder();
+  let buffer = "";
+  await port.open({ baudRate: 115200 });
+  // Keep EN and GPIO0 released so reopening the port does not reset the ESP32 again.
+  await port.setSignals({ dataTerminalReady: false, requestToSend: false });
+  const reader = port.readable.getReader();
+  const writer = port.writable.getWriter();
+  const pump = (async () => {
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+      }
+    } catch (e) { /* the port was closed */ }
+  })();
+  const waitFor = async (pattern, timeoutMs) => {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const match = buffer.match(pattern);
+      if (match) {
+        buffer = buffer.slice(match.index + match[0].length);
+        return match[0].trim();
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return null;
+  };
+  const run = async (command, success, failure) => {
+    log(`> ${command}`);
+    await writer.write(encoder.encode(command + "\r\n"));
+    const reply = await waitFor(new RegExp(`${success.source}|${failure.source}`), 5000);
+    if (!reply || !success.test(reply)) throw Error(`'${command}' failed${reply ? `: ${reply}` : " (no reply)"}`);
+    log(reply);
+  };
+  try {
+    status("Waiting for the firmware to start…");
+    // Only firmware with device settings support prints this line, after the console command is registered.
+    const ready = await waitFor(/dongle_m_settings: [^\r\n]*/, 25000);
+    if (!ready) {
+      throw Error("Flashing succeeded, but this firmware did not report device settings support, so the " +
+        "advanced settings were not applied");
+    }
+    log(ready);
+    const failure = /Usage:|Invalid hostname[^\r\n]*|Failed to store[^\r\n]*/;
+    if (settings.netmode) {
+      await run(`dongle netmode ${settings.netmode}`, /Network mode set to \w+/, failure);
+    }
+    if (settings.hostname) {
+      await run(`dongle hostname ${settings.hostname}`, /Hostname set to [a-z0-9-]+/, failure);
+    }
+    log("> dongle reboot");
+    await writer.write(encoder.encode("dongle reboot\r\n"));
+    status("Advanced settings applied. The Dongle-M is restarting with them.");
+  } finally {
+    try { await reader.cancel(); } catch (e) { /* already closed */ }
+    await pump;
+    reader.releaseLock();
+    writer.releaseLock();
+    await port.close();
+  }
+}
+
 async function flash() {
   if (busy) return;
   const mode = currentMode();
   const custom = $("source").value === "custom";
-  if (!$("confirm").checked || (!custom && !releaseManifest)) return;
+  const settings = deviceSettings();
+  if (!$("confirm").checked || !settings.valid || (!custom && !releaseManifest)) return;
   // The explicit mode-specific acknowledgement checkbox above is the
   // confirmation. Do not show a redundant native browser confirm dialog.
   busy = true; refresh();
@@ -139,6 +213,11 @@ async function flash() {
     status(mode.destructive
       ? "Fresh installation complete; ESP32 reset pulse sent. Connect via Ethernet, or use the setup access point to configure Wi-Fi if needed. Then set up or restore your Thread network."
       : "Upgrade complete; ESP32 reset pulse sent. The Dongle-M should reconnect over its configured Ethernet or Wi-Fi network with the Thread dataset preserved.");
+    if (settings.netmode || settings.hostname) {
+      await transport.disconnect();
+      transport = null;
+      await applySettings(port, settings);
+    }
   } catch (error) {
     status(`Error: ${error.message || error}`);
   } finally {

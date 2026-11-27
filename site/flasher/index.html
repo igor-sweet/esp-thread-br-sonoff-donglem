@@ -16,7 +16,9 @@
     .choice:has(input:checked){border:2px solid #63c0f6;padding:15px;background:#173551}
     .choice strong{display:block;font-size:1.02rem}.choice small{display:block;color:#b7c7d8;font-weight:400;margin-top:6px}
     .choice input{accent-color:#63c0f6;margin-right:6px}
-    select,input[type=file]{width:100%;padding:11px;color:inherit;background:#0f1c2d;border:1px solid #4b607c;border-radius:9px}
+    details#advanced{margin-top:18px}details#advanced summary{cursor:pointer;font-weight:650}
+    input[type=text]:invalid{border-color:#e8ac5a}
+    select,input[type=file],input[type=text]{width:100%;padding:11px;color:inherit;background:#0f1c2d;border:1px solid #4b607c;border-radius:9px}
     button{padding:13px 19px;border:0;border-radius:10px;background:#5dc0ee;color:#082136;font-weight:750;cursor:pointer}
     button:disabled{opacity:.42;cursor:not-allowed}.hint{font-size:.9rem;color:#a9bfd6}
     .warning{border-left:3px solid #e8ac5a;background:#342819;padding:12px 15px;border-radius:6px;color:#ffe8c8}
@@ -54,6 +56,19 @@
       <input id="custom-file" type="file" accept=".bin,application/octet-stream">
       <p class="warning">Custom files are not signature-verified. Only use a trusted <strong>merged image at 0x0</strong> for Fresh installation or a <strong>Dongle-M upgrade image at 0x20000</strong> for Upgrade. Wrong images or offsets can make the ESP32 unbootable.</p>
     </div>
+    <details id="advanced"><summary>Advanced device settings (optional)</summary>
+      <p class="hint">Most users can skip this. Settings left unchanged keep the device's current values (Upgrade) or the defaults (Fresh installation). They are applied over USB after flashing, using the firmware's <code>dongle</code> console command.</p>
+      <label for="netmode">Network mode</label>
+      <select id="netmode">
+        <option value="">Unchanged</option>
+        <option value="auto">Automatic: Ethernet first, Wi-Fi fallback</option>
+        <option value="ethernet">Ethernet only: no Wi-Fi, no setup access point</option>
+        <option value="wifi">Wi-Fi only: Ethernet is not started</option>
+      </select>
+      <label for="hostname">Hostname</label>
+      <input id="hostname" type="text" placeholder="Unchanged (default: esp-ot-br)" maxlength="32" pattern="[a-z0-9]([a-z0-9\-]{0,30}[a-z0-9])?" autocomplete="off" spellcheck="false">
+      <p class="hint" id="hostname-hint">1–32 lowercase letters, digits or '-', not starting or ending with '-'. Used for mDNS (<code>name.local</code>) and as DHCP hostname.</p>
+    </details>
   </section>
   <section class="panel">
     <h2>3 · Flash over USB-C</h2>
