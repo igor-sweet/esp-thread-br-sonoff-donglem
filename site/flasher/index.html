@@ -82,9 +82,10 @@
     <p>Ensure you've completed the <a href="https://github.com/Scoobler/esp-thread-br-sonoff-donglem#prerequisites" target="_blank" rel="noopener noreferrer">prerequisites in the README</a> before flashing.</p>
     <label id="confirmation-label"><input id="confirm" type="checkbox"> I have backed up my Thread dataset and understand this operation erases my ESP32 settings.</label>
     <p><button id="flash" disabled>Connect and flash</button></p>
-    <label for="progress">Progress</label><progress id="progress" value="0" max="100"></progress>
+    <div id="firmware-progress-row"><label for="progress">1 · Firmware</label><progress id="progress" value="0" max="100"></progress></div>
+    <div id="settings-progress-row" hidden><label for="settings-progress" id="settings-progress-label">2 · Device settings</label><progress id="settings-progress" value="0" max="100"></progress></div>
     <p role="status" id="status">Preparing…</p>
-    <details><summary>Flasher log</summary><pre id="log" aria-live="polite"></pre></details>
+    <details id="log-details"><summary>Flasher log</summary><pre id="log" aria-live="polite"></pre></details>
   </section>
   <footer>Project: <a href="https://github.com/Scoobler/esp-thread-br-sonoff-donglem">Scoobler/esp-thread-br-sonoff-donglem</a>. This tool flashes the ESP32 host only. USB serial access requires HTTPS and a compatible Chromium browser.</footer>
 </main>

@@ -17,6 +17,11 @@ const log = (message) => {
   $("log").scrollTop = $("log").scrollHeight;
 };
 const status = (message) => { $("status").textContent = message; log(message); };
+const fail = (error) => {
+  status(`Error: ${error.message || error}`);
+  $("log-details").open = true; // the log usually explains what went wrong
+};
+const settingsProgress = (value) => { $("settings-progress").value = value; };
 const currentMode = () => MODE[modeInputs.find(i => i.checked).value];
 const HOSTNAME = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/;
 function deviceSettings() {
@@ -28,6 +33,10 @@ function refresh() {
   const mode = currentMode();
   const custom = $("source").value === "custom";
   $("firmware-source").hidden = !mode.flashes;
+  const settings = deviceSettings();
+  $("firmware-progress-row").hidden = !mode.flashes;
+  $("settings-progress-row").hidden = mode.flashes && !settings.netmode && !settings.hostname;
+  $("settings-progress-label").textContent = mode.flashes ? "2 · Device settings" : "Device settings";
   $("step2-title").textContent = mode.flashes ? "2 · Select firmware" : "2 · Device settings";
   if (!mode.flashes) $("advanced").open = true;
   $("latest-details").hidden = custom;
@@ -162,6 +171,7 @@ async function readSettings(con) {
     if (match) log("The device restarted when the port was opened.");
   }
   if (!match) throw Error("No reply to 'dongle': this firmware does not support device settings");
+  settingsProgress(25);
   return { netmode: match[1], hostname: match[2] };
 }
 
@@ -175,6 +185,7 @@ async function applyChanges(con, wanted, reported) {
     changes.push([`dongle hostname ${wanted.hostname}`, /Hostname set to [a-z0-9-]+/]);
   }
   if (!changes.length) {
+    settingsProgress(100);
     status("Device settings already match; nothing to change.");
     return false;
   }
@@ -186,7 +197,9 @@ async function applyChanges(con, wanted, reported) {
     }
     log(reply[0].trim());
   }
+  settingsProgress(50);
   await con.send("dongle reboot");
+  settingsProgress(75);
   status("Device settings applied. Waiting for the Dongle-M to restart…");
   // The boot line after the restart shows what the device actually loaded from NVS.
   const ready = await con.waitFor(READY, 30000);
@@ -195,6 +208,7 @@ async function applyChanges(con, wanted, reported) {
     return true;
   }
   log(ready[0].trim());
+  settingsProgress(100);
   const mismatch = (wanted.netmode && ready[1] !== wanted.netmode) ||
     (wanted.hostname && ready[2] !== wanted.hostname);
   status(mismatch
@@ -218,6 +232,7 @@ async function settingsOnly() {
   try {
     if (!session) {
       if (!("serial" in navigator)) throw Error("Web Serial is unavailable. Use desktop Chrome or Edge over HTTPS.");
+      settingsProgress(0);
       status("Select the Dongle-M USB serial port in the browser prompt.");
       session = await openConsole(await navigator.serial.requestPort());
       status("Reading current device settings…");
@@ -231,7 +246,7 @@ async function settingsOnly() {
       await closeSession();
     }
   } catch (error) {
-    status(`Error: ${error.message || error}`);
+    fail(error);
     await closeSession();
   } finally {
     busy = false;
@@ -249,6 +264,7 @@ async function flash() {
   // confirmation. Do not show a redundant native browser confirm dialog.
   busy = true; refresh();
   $("progress").value = 0;
+  settingsProgress(0);
   let transport = null;
   try {
     if (!("serial" in navigator)) throw Error("Web Serial is unavailable. Use desktop Chrome or Edge over HTTPS.");
@@ -311,13 +327,14 @@ async function flash() {
             "advanced settings were not applied");
         }
         log(ready[0].trim());
+        settingsProgress(25);
         await applyChanges(con, settings, { netmode: ready[1], hostname: ready[2] });
       } finally {
         await con.close();
       }
     }
   } catch (error) {
-    status(`Error: ${error.message || error}`);
+    fail(error);
   } finally {
     if (transport) {
       try { await transport.disconnect(); } catch (e) { log(`Disconnect: ${e.message || e}`); }
