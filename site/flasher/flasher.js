@@ -33,7 +33,7 @@ function refresh() {
   $("latest-details").hidden = custom;
   $("custom-details").hidden = !custom;
   $("mode-warning").innerHTML = !mode.flashes
-    ? "Device settings only reads and changes the network mode and hostname with the firmware's <strong>dongle</strong> console command. <strong>No firmware is written.</strong> It needs firmware with device settings support."
+    ? "Device settings only reads and changes the network mode and hostname with the firmware's <strong>dongle</strong> console command. <strong>No firmware is written.</strong> It needs firmware with device settings support. Connecting may restart the Dongle-M."
     : mode.destructive
     ? "Fresh installation <strong>erases all ESP32 flash</strong> and clears existing network and Thread settings. Use this for first-time installation or when replacing stock Sonoff ESP32 firmware. The MG24 RCP is not changed."
     : "Upgrade is <strong>only for devices already running Scoobler OpenThread Border Router firmware</strong>. It updates the ESP32 application and Web UI from <strong>0x20000</strong> while retaining supported network and Thread settings. Use Fresh installation when replacing stock Sonoff firmware.";
@@ -159,6 +159,7 @@ async function readSettings(con) {
   if (!match) {
     // Opening the port may have restarted the ESP32; the boot line reports the same values.
     match = await con.waitFor(READY, 25000);
+    if (match) log("The device restarted when the port was opened.");
   }
   if (!match) throw Error("No reply to 'dongle': this firmware does not support device settings");
   return { netmode: match[1], hostname: match[2] };
@@ -186,7 +187,19 @@ async function applyChanges(con, wanted, reported) {
     log(reply[0].trim());
   }
   await con.send("dongle reboot");
-  status("Device settings applied. The Dongle-M is restarting with them.");
+  status("Device settings applied. Waiting for the Dongle-M to restart…");
+  // The boot line after the restart shows what the device actually loaded from NVS.
+  const ready = await con.waitFor(READY, 30000);
+  if (!ready) {
+    status("Settings were applied, but the restart could not be confirmed. Check the device.");
+    return true;
+  }
+  log(ready[0].trim());
+  const mismatch = (wanted.netmode && ready[1] !== wanted.netmode) ||
+    (wanted.hostname && ready[2] !== wanted.hostname);
+  status(mismatch
+    ? `Warning: after the restart the device reports network mode ${ready[1]}, hostname ${ready[2]}.`
+    : `Restart complete. The device reports network mode ${ready[1]}, hostname ${ready[2]}, as requested.`);
   return true;
 }
 
