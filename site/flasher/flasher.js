@@ -199,7 +199,8 @@ async function applyChanges(con, wanted, reported) {
     (wanted.hostname && ready[2] !== wanted.hostname);
   status(mismatch
     ? `Warning: after the restart the device reports network mode ${ready[1]}, hostname ${ready[2]}.`
-    : `Restart complete. The device reports network mode ${ready[1]}, hostname ${ready[2]}, as requested.`);
+    : `Restart complete. The device loaded network mode ${ready[1]}, hostname ${ready[2]}, as requested. ` +
+      "Network and Thread will be ready in about half a minute.");
   return true;
 }
 
