@@ -3,11 +3,14 @@ import { ESPLoader, Transport } from "https://unpkg.com/esptool-js@0.7.1/bundle.
 const $ = (id) => document.getElementById(id);
 const modeInputs = [...document.querySelectorAll('input[name="mode"]')];
 const MODE = {
-  fresh: { address: 0x0, manifestKey: "full", label: "Fresh installation", destructive: true },
-  upgrade: { address: 0x20000, manifestKey: "upgrade", label: "Upgrade", destructive: false }
+  fresh: { address: 0x0, manifestKey: "full", label: "Fresh installation", destructive: true, flashes: true },
+  upgrade: { address: 0x20000, manifestKey: "upgrade", label: "Upgrade", destructive: false, flashes: true },
+  settings: { label: "Device settings only", destructive: false, flashes: false }
 };
 let releaseManifest = null;
 let busy = false;
+let session = null; // console kept open between reading and applying in "Device settings only"
+let current = null; // settings reported by the device
 const log = (message) => {
   const time = new Date().toLocaleTimeString();
   $("log").textContent += `[${time}] ${String(message)}\n`;
@@ -24,21 +27,33 @@ function deviceSettings() {
 function refresh() {
   const mode = currentMode();
   const custom = $("source").value === "custom";
+  $("firmware-source").hidden = !mode.flashes;
+  $("step2-title").textContent = mode.flashes ? "2 · Select firmware" : "2 · Device settings";
+  if (!mode.flashes) $("advanced").open = true;
   $("latest-details").hidden = custom;
   $("custom-details").hidden = !custom;
-  $("mode-warning").innerHTML = mode.destructive
+  $("mode-warning").innerHTML = !mode.flashes
+    ? "Device settings only reads and changes the network mode and hostname with the firmware's <strong>dongle</strong> console command. <strong>No firmware is written.</strong> It needs firmware with device settings support."
+    : mode.destructive
     ? "Fresh installation <strong>erases all ESP32 flash</strong> and clears existing network and Thread settings. Use this for first-time installation or when replacing stock Sonoff ESP32 firmware. The MG24 RCP is not changed."
     : "Upgrade is <strong>only for devices already running Scoobler OpenThread Border Router firmware</strong>. It updates the ESP32 application and Web UI from <strong>0x20000</strong> while retaining supported network and Thread settings. Use Fresh installation when replacing stock Sonoff firmware.";
   $("confirmation-label").lastChild.textContent = mode.destructive
     ? " I understand this will erase all ESP32 settings, and have backed up my Thread dataset if one exists."
     : " This device already runs Scoobler OpenThread Border Router firmware, and I have backed up my Thread dataset.";
-  $("flash").disabled = busy || !$("confirm").checked || !deviceSettings().valid ||
-    (custom ? !$("custom-file").files.length : !releaseManifest);
+  $("confirmation-label").hidden = !mode.flashes;
+  $("flash").textContent = mode.flashes ? "Connect and flash" : session ? "Apply settings" : "Connect and read settings";
+  $("flash").disabled = busy || !deviceSettings().valid ||
+    (mode.flashes && (!$("confirm").checked || (custom ? !$("custom-file").files.length : !releaseManifest)));
+  $("current-settings").hidden = !current;
+  if (current) {
+    $("current-settings").textContent = `Device reports: network mode ${current.netmode}, hostname ${current.hostname}.`;
+  }
 }
-modeInputs.forEach(i => i.addEventListener("change", () => {
+modeInputs.forEach(i => i.addEventListener("change", async () => {
   // The acknowledgement belongs to the selected operation; changing
   // between Upgrade and Fresh installation requires a new acknowledgement.
   $("confirm").checked = false;
+  await closeSession();
   refresh();
 }));
 $("source").addEventListener("change", refresh);
@@ -87,13 +102,18 @@ async function getImage(mode) {
   return new Uint8Array(data);
 }
 
-async function applySettings(port, settings) {
-  // Applies the advanced settings through the firmware's "dongle" console command after the reset.
+// Firmware with device settings support prints this line at boot, after the "dongle" command is registered.
+const READY = /dongle_m_settings: Network mode: (\w+), hostname: ([a-z0-9-]+)\r?\n/;
+// Reply to "dongle": the stored values, e.g. "netmode:  ethernet" and "hostname: esp-ot-br (default)".
+const SHOWN = /netmode:\s+(\w+)[^\n]*\n\s*hostname:\s+([a-z0-9-]+)/;
+const FAILED = /Usage:|Invalid hostname[^\r\n]*\r?\n|Failed to store[^\r\n]*\r?\n/;
+
+async function openConsole(port) {
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
   let buffer = "";
   await port.open({ baudRate: 115200 });
-  // Keep EN and GPIO0 released so reopening the port does not reset the ESP32 again.
+  // Keep EN and GPIO0 released so opening the port does not reset the ESP32.
   await port.setSignals({ dataTerminalReady: false, requestToSend: false });
   const reader = port.readable.getReader();
   const writer = port.writable.getWriter();
@@ -106,50 +126,102 @@ async function applySettings(port, settings) {
       }
     } catch (e) { /* the port was closed */ }
   })();
-  const waitFor = async (pattern, timeoutMs) => {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const match = buffer.match(pattern);
-      if (match) {
-        buffer = buffer.slice(match.index + match[0].length);
-        return match[0].trim();
+  return {
+    async waitFor(pattern, timeoutMs) {
+      const deadline = Date.now() + timeoutMs;
+      while (Date.now() < deadline) {
+        const match = buffer.match(pattern);
+        if (match) {
+          buffer = buffer.slice(match.index + match[0].length);
+          return match;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
-      await new Promise(resolve => setTimeout(resolve, 100));
+      return null;
+    },
+    async send(command) {
+      log(`> ${command}`);
+      await writer.write(encoder.encode(command + "\r\n"));
+    },
+    async close() {
+      try { await reader.cancel(); } catch (e) { /* already closed */ }
+      await pump;
+      reader.releaseLock();
+      writer.releaseLock();
+      await port.close();
     }
-    return null;
   };
-  const run = async (command, success, failure) => {
-    log(`> ${command}`);
-    await writer.write(encoder.encode(command + "\r\n"));
-    const reply = await waitFor(new RegExp(`${success.source}|${failure.source}`), 5000);
-    if (!reply || !success.test(reply)) throw Error(`'${command}' failed${reply ? `: ${reply}` : " (no reply)"}`);
-    log(reply);
-  };
+}
+
+async function readSettings(con) {
+  await con.send("dongle");
+  let match = await con.waitFor(SHOWN, 3000);
+  if (!match) {
+    // Opening the port may have restarted the ESP32; the boot line reports the same values.
+    match = await con.waitFor(READY, 25000);
+  }
+  if (!match) throw Error("No reply to 'dongle': this firmware does not support device settings");
+  return { netmode: match[1], hostname: match[2] };
+}
+
+async function applyChanges(con, wanted, reported) {
+  // Only differences are sent, and the device only restarts if something changed.
+  const changes = [];
+  if (wanted.netmode && wanted.netmode !== reported.netmode) {
+    changes.push([`dongle netmode ${wanted.netmode}`, /Network mode set to \w+/]);
+  }
+  if (wanted.hostname && wanted.hostname !== reported.hostname) {
+    changes.push([`dongle hostname ${wanted.hostname}`, /Hostname set to [a-z0-9-]+/]);
+  }
+  if (!changes.length) {
+    status("Device settings already match; nothing to change.");
+    return false;
+  }
+  for (const [command, success] of changes) {
+    await con.send(command);
+    const reply = await con.waitFor(new RegExp(`${success.source}|${FAILED.source}`), 5000);
+    if (!reply || !success.test(reply[0])) {
+      throw Error(`'${command}' failed${reply ? `: ${reply[0].trim()}` : " (no reply)"}`);
+    }
+    log(reply[0].trim());
+  }
+  await con.send("dongle reboot");
+  status("Device settings applied. The Dongle-M is restarting with them.");
+  return true;
+}
+
+async function closeSession() {
+  if (!session) return;
+  const con = session;
+  session = null;
+  current = null;
+  try { await con.close(); } catch (e) { log(`Disconnect: ${e.message || e}`); }
+}
+
+async function settingsOnly() {
+  if (busy || !deviceSettings().valid) return;
+  busy = true; refresh();
   try {
-    status("Waiting for the firmware to start…");
-    // Only firmware with device settings support prints this line, after the console command is registered.
-    const ready = await waitFor(/dongle_m_settings: [^\r\n]*/, 25000);
-    if (!ready) {
-      throw Error("Flashing succeeded, but this firmware did not report device settings support, so the " +
-        "advanced settings were not applied");
+    if (!session) {
+      if (!("serial" in navigator)) throw Error("Web Serial is unavailable. Use desktop Chrome or Edge over HTTPS.");
+      status("Select the Dongle-M USB serial port in the browser prompt.");
+      session = await openConsole(await navigator.serial.requestPort());
+      status("Reading current device settings…");
+      current = await readSettings(session);
+      $("netmode").value = current.netmode;
+      $("hostname").value = current.hostname;
+      status(`Current settings: network mode ${current.netmode}, hostname ${current.hostname}. ` +
+        "Change them and select Apply settings.");
+    } else {
+      await applyChanges(session, deviceSettings(), current);
+      await closeSession();
     }
-    log(ready);
-    const failure = /Usage:|Invalid hostname[^\r\n]*|Failed to store[^\r\n]*/;
-    if (settings.netmode) {
-      await run(`dongle netmode ${settings.netmode}`, /Network mode set to \w+/, failure);
-    }
-    if (settings.hostname) {
-      await run(`dongle hostname ${settings.hostname}`, /Hostname set to [a-z0-9-]+/, failure);
-    }
-    log("> dongle reboot");
-    await writer.write(encoder.encode("dongle reboot\r\n"));
-    status("Advanced settings applied. The Dongle-M is restarting with them.");
+  } catch (error) {
+    status(`Error: ${error.message || error}`);
+    await closeSession();
   } finally {
-    try { await reader.cancel(); } catch (e) { /* already closed */ }
-    await pump;
-    reader.releaseLock();
-    writer.releaseLock();
-    await port.close();
+    busy = false;
+    refresh();
   }
 }
 
@@ -216,7 +288,19 @@ async function flash() {
     if (settings.netmode || settings.hostname) {
       await transport.disconnect();
       transport = null;
-      await applySettings(port, settings);
+      const con = await openConsole(port);
+      try {
+        status("Waiting for the firmware to start…");
+        const ready = await con.waitFor(READY, 25000);
+        if (!ready) {
+          throw Error("Flashing succeeded, but this firmware did not report device settings support, so the " +
+            "advanced settings were not applied");
+        }
+        log(ready[0].trim());
+        await applyChanges(con, settings, { netmode: ready[1], hostname: ready[2] });
+      } finally {
+        await con.close();
+      }
     }
   } catch (error) {
     status(`Error: ${error.message || error}`);
@@ -228,7 +312,7 @@ async function flash() {
     refresh();
   }
 }
-$("flash").addEventListener("click", flash);
+$("flash").addEventListener("click", () => (currentMode().flashes ? flash() : settingsOnly()));
 
 async function loadManifest() {
   try {

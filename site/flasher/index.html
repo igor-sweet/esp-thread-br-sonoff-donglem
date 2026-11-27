@@ -11,7 +11,7 @@
     h1{font-size:clamp(1.7rem,5vw,2.5rem);letter-spacing:-.035em;margin:0 0 8px}h2{font-size:1.15rem;margin:0 0 12px}
     p{color:#b6c4d8}.eyebrow{color:#75c8ed;font-size:.78rem;text-transform:uppercase;letter-spacing:.13em;font-weight:700}
     .sub{margin-top:0}.panel{background:#162236;border:1px solid #32425b;border-radius:16px;padding:24px;margin:20px 0}
-    label{display:block;font-weight:650;margin:14px 0 8px}.choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+    label{display:block;font-weight:650;margin:14px 0 8px}.choices{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
     .choice{border:1px solid #445671;border-radius:12px;padding:16px;cursor:pointer;margin:0;background:#1a2a40}
     .choice:has(input:checked){border:2px solid #63c0f6;padding:15px;background:#173551}
     .choice strong{display:block;font-size:1.02rem}.choice small{display:block;color:#b7c7d8;font-weight:400;margin-top:6px}
@@ -43,11 +43,16 @@
         <strong>Upgrade</strong>
         <small>Only for devices already running Scoobler OpenThread Border Router firmware. Preserve Wi-Fi credentials and the Thread dataset.</small>
       </label>
+      <label class="choice"><input type="radio" name="mode" value="settings">
+        <strong>Device settings only</strong>
+        <small>Read and change the network mode and hostname over USB. No firmware is written.</small>
+      </label>
     </div>
     <p class="warning" id="mode-warning">Fresh installation erases <strong>all ESP32 flash</strong>. Back up your Thread Active Dataset and prepare to configure Wi-Fi again. The MG24 RCP is separate and is not flashed.</p>
   </section>
   <section class="panel">
-    <h2>2 · Select firmware</h2>
+    <h2 id="step2-title">2 · Select firmware</h2>
+    <div id="firmware-source">
     <label for="source">Firmware source</label>
     <select id="source"><option value="latest">Latest published release</option><option value="custom">Custom .bin file (advanced)</option></select>
     <div id="latest-details"><p id="release">Loading published release details…</p><p class="hint">The firmware is served from this GitHub Pages site. Release files are verified against published SHA-256 checksums before flashing.</p></div>
@@ -55,6 +60,7 @@
       <label for="custom-file">Choose a binary for the selected operation</label>
       <input id="custom-file" type="file" accept=".bin,application/octet-stream">
       <p class="warning">Custom files are not signature-verified. Only use a trusted <strong>merged image at 0x0</strong> for Fresh installation or a <strong>Dongle-M upgrade image at 0x20000</strong> for Upgrade. Wrong images or offsets can make the ESP32 unbootable.</p>
+    </div>
     </div>
     <details id="advanced"><summary>Advanced device settings (optional)</summary>
       <p class="hint">Most users can skip this. Settings left unchanged keep the device's current values (Upgrade) or the defaults (Fresh installation). They are applied over USB after flashing, using the firmware's <code>dongle</code> console command.</p>
@@ -67,6 +73,7 @@
       </select>
       <label for="hostname">Hostname</label>
       <input id="hostname" type="text" placeholder="Unchanged (default: esp-ot-br)" maxlength="32" pattern="[a-z0-9]([a-z0-9\-]{0,30}[a-z0-9])?" autocomplete="off" spellcheck="false">
+      <p class="hint" id="current-settings" hidden></p>
       <p class="hint" id="hostname-hint">1–32 lowercase letters, digits or '-', not starting or ending with '-'. Used for mDNS (<code>name.local</code>) and as DHCP hostname.</p>
     </details>
   </section>
